@@ -3,14 +3,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Calendar,
-  CheckCircle2,
+  ArrowUpRight,
+  Check,
   Clock,
-  Coins,
+  Download,
   Moon,
   Plus,
+  RotateCcw,
   ShieldAlert,
-  Sparkles,
+  Terminal,
   Trash2,
 } from 'lucide-react';
 import {
@@ -20,6 +21,7 @@ import {
   WageRules,
 } from '@/types/shift';
 import {
+  addDays,
   calculateMonthlySummary,
   calculateShift,
   calculateTaxWallStatus,
@@ -63,7 +65,6 @@ export default function JapanVisaShiftDashboard() {
     localShiftRepository.saveRules(next);
   };
 
-  // Live preview of the shift currently being typed into the form
   const liveDraftPreview = useMemo(() => {
     try {
       return calculateShift(
@@ -103,6 +104,18 @@ export default function JapanVisaShiftDashboard() {
     return calculateTaxWallStatus(shifts, year, month, rules);
   }, [shifts, referenceDate, rules]);
 
+  // 7-day daily breakdown for the GitHub-style contribution strip
+  const sevenDayStrip = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = addDays(referenceDate, -i);
+      const dayShifts = computedShifts.filter((s) => s.date === d);
+      const hours = dayShifts.reduce((acc, s) => acc + s.netWorkedHours, 0);
+      days.push({ date: d, hours: Number(hours.toFixed(2)) });
+    }
+    return days;
+  }, [referenceDate, computedShifts]);
+
   const handleAddShift = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -116,19 +129,30 @@ export default function JapanVisaShiftDashboard() {
         baseHourlyYen: Number(baseHourlyYen),
         note: note.trim() || undefined,
       };
-      // Validate calculation before saving
       calculateShift(candidate, rules);
       const updated = localShiftRepository.save(candidate);
       setShifts(updated);
       setReferenceDate(date);
       setNote('');
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Invalid shift parameters');
+      setErrorMsg(err instanceof Error ? err.message : 'Invalid shift input');
     }
   };
 
   const handleDeleteShift = (id: string) => {
     setShifts(localShiftRepository.remove(id));
+  };
+
+  const handleExportJson = () => {
+    const blob = new Blob([JSON.stringify({ shifts, rules }, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shifts-backup-${referenceDate}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const applyPreset = (
@@ -143,263 +167,347 @@ export default function JapanVisaShiftDashboard() {
     setNote(presetNote);
   };
 
-  const badgeStyles = (status: VisaComplianceLevel) => {
+  const statusTagStyle = (status: VisaComplianceLevel) => {
     if (status === 'VIOLATION') {
-      return 'bg-red-500/15 text-red-400 border-red-500/40';
+      return 'bg-red-950/80 text-red-400 border-red-800';
     }
     if (status === 'WARNING') {
-      return 'bg-amber-500/15 text-amber-300 border-amber-500/40';
+      return 'bg-amber-950/80 text-amber-300 border-amber-800';
     }
-    return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40';
-  };
-
-  const gaugeBarColor = (status: VisaComplianceLevel) => {
-    if (status === 'VIOLATION') return 'bg-red-500';
-    if (status === 'WARNING') return 'bg-amber-400';
-    return 'bg-emerald-500';
+    return 'bg-[#0d2818] text-[#39d353] border-[#238636]';
   };
 
   if (!mounted) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-        <p className="text-sm text-slate-400 animate-pulse">
-          Loading Japan Visa Shift & Wage Engine...
-        </p>
+      <div className="min-h-screen bg-[#09090b] text-zinc-400 font-mono text-xs flex items-center justify-center">
+        [SYS] INITIALIZING SHIFT LEDGER...
       </div>
     );
   }
 
-  const rollingPct = Math.min(
-    100,
-    (visaSummary.currentRolling7Day.totalHours / visaSummary.activeLimitHours) * 100
-  );
+  const totalSegments = visaSummary.activeLimitHours;
+  const filledSegments = Math.ceil(visaSummary.currentRolling7Day.totalHours);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
-      {/* Top Header */}
-      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                資格外活動許可 • 28h Rule Engine
-              </span>
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                深夜割増 1.25x (22:00–05:00)
+    <div className="min-h-screen bg-[#09090b] text-zinc-100 pb-20 selection:bg-[#238636] selection:text-white">
+      {/* Top Utility Bar */}
+      <header className="border-b border-zinc-800 bg-[#09090b] sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 bg-[#0d2818] border border-[#238636] flex items-center justify-center text-[#39d353]">
+              <Terminal className="w-4 h-4" />
+            </div>
+            <div className="flex items-baseline gap-3">
+              <h1 className="text-sm font-mono font-bold tracking-tight text-zinc-100 uppercase">
+                JP-VISA-LEDGER // 28H-AUDIT
+              </h1>
+              <span className="hidden md:inline-block text-[11px] font-mono text-zinc-500">
+                LSA ART.37 (22:00-05:00 @ 1.25x)
               </span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white mt-1">
-              Japan Student Visa Shift & Wage Tracker
-            </h1>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Vacation Mode Toggle */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Semester vs Vacation Switch */}
             <button
               type="button"
               onClick={() =>
                 updateRules({ isVacationPeriod: !rules.isVacationPeriod })
               }
-              className={`px-3.5 py-2 rounded-lg text-xs font-semibold border transition flex items-center gap-2 ${
+              className={`px-3 py-1.5 text-xs font-mono border transition flex items-center gap-2 ${
                 rules.isVacationPeriod
-                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
-                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                  ? 'bg-[#0d2818] text-[#39d353] border-[#238636]'
+                  : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:border-zinc-700'
               }`}
             >
-              <Calendar className="w-4 h-4" />
-              {rules.isVacationPeriod
-                ? 'Official School Vacation (40h Limit)'
-                : 'Regular Semester (28h Limit)'}
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  rules.isVacationPeriod ? 'bg-[#39d353]' : 'bg-zinc-500'
+                }`}
+              />
+              {rules.isVacationPeriod ? 'VACATION_CAP: 40H' : 'SEMESTER_CAP: 28H'}
             </button>
 
-            {/* Inspection Reference Date */}
-            <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5">
-              <span className="text-xs text-slate-400">Audit Date:</span>
+            {/* Audit Date Selector */}
+            <div className="flex items-center bg-zinc-900 border border-zinc-800 px-2.5 py-1">
+              <span className="text-[11px] font-mono text-zinc-500 mr-2">
+                AUDIT_DATE
+              </span>
               <input
                 type="date"
                 value={referenceDate}
                 onChange={(e) => setReferenceDate(e.target.value)}
-                className="bg-transparent text-xs font-mono text-white focus:outline-none"
+                className="bg-transparent text-xs font-mono text-zinc-200 focus:outline-none"
               />
             </div>
+
+            <button
+              type="button"
+              onClick={handleExportJson}
+              title="Export JSON Backup"
+              className="p-1.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 transition"
+            >
+              <Download className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
-        {/* Top Row: Visa Safety Gauge + Monthly Payout + Tax Wall */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Card 1: Rolling 7-Day Visa Compliance Gauge */}
-          <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col justify-between">
+        {/* Top 3-Column Metrics Grid (Sharp 1px Hairline Frame) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 border border-zinc-800 bg-zinc-900/20 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800">
+          {/* Panel 1: Rolling 7-Day Visa Telemetry */}
+          <section className="p-5 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-wider font-semibold text-slate-400">
-                  Rolling 7-Day Visa Window
+                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                  01 / ROLLING 7-DAY IMMIGRATION WINDOW
                 </span>
                 <span
-                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badgeStyles(
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-mono font-semibold border ${statusTagStyle(
                     visaSummary.currentRolling7Day.status
                   )}`}
                 >
                   {visaSummary.currentRolling7Day.status === 'VIOLATION' && (
-                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <ShieldAlert className="w-3 h-3" />
                   )}
                   {visaSummary.currentRolling7Day.status === 'WARNING' && (
-                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <AlertTriangle className="w-3 h-3" />
                   )}
                   {visaSummary.currentRolling7Day.status === 'SAFE' && (
-                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <Check className="w-3 h-3" />
                   )}
                   {visaSummary.currentRolling7Day.status}
                 </span>
               </div>
 
-              <p className="text-xs text-slate-400 mt-1 font-mono">
-                {visaSummary.currentRolling7Day.windowStartDate} →{' '}
-                {visaSummary.currentRolling7Day.windowEndDate} (7 Consecutive Days)
-              </p>
-
-              <div className="mt-4 flex items-baseline justify-between">
+              <div className="mt-4 flex items-baseline justify-between font-mono tabular-nums">
                 <div>
-                  <span className="text-3xl font-extrabold text-white">
-                    {visaSummary.currentRolling7Day.totalHours}h
+                  <span className="text-3xl font-bold text-white">
+                    {visaSummary.currentRolling7Day.totalHours.toFixed(2)}
                   </span>
-                  <span className="text-sm text-slate-400 ml-1">
-                    / {visaSummary.activeLimitHours}h limit
+                  <span className="text-xs text-zinc-500 ml-1.5">
+                    / {visaSummary.activeLimitHours}.00 HRS
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="text-xs text-slate-400 block">Remaining Safe</span>
-                  <span className="text-lg font-bold text-emerald-400">
-                    {visaSummary.currentRolling7Day.remainingHours}h left
+                  <span className="text-[11px] text-zinc-500 block">
+                    SAFE BUFFER
+                  </span>
+                  <span
+                    className={`text-base font-bold ${
+                      visaSummary.currentRolling7Day.remainingHours === 0
+                        ? 'text-red-400'
+                        : 'text-[#39d353]'
+                    }`}
+                  >
+                    {visaSummary.currentRolling7Day.remainingHours.toFixed(2)}h
                   </span>
                 </div>
               </div>
 
-              {/* Progress Gauge */}
-              <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden mt-3">
+              {/* Segmented LED Bar (1 block = 1 hour) */}
+              <div className="mt-4">
                 <div
-                  className={`h-full transition-all duration-300 ${gaugeBarColor(
-                    visaSummary.currentRolling7Day.status
-                  )}`}
-                  style={{ width: `${rollingPct}%` }}
-                />
+                  className="grid gap-1"
+                  style={{
+                    gridTemplateColumns: `repeat(${totalSegments}, minmax(0, 1fr))`,
+                  }}
+                >
+                  {Array.from({ length: totalSegments }).map((_, idx) => {
+                    const hourIndex = idx + 1;
+                    const isActive = hourIndex <= filledSegments;
+                    const isWarningZone =
+                      hourIndex > rules.warningThresholdHours &&
+                      hourIndex <= totalSegments;
+
+                    let cellColor = 'bg-zinc-800/80';
+                    if (isActive) {
+                      if (
+                        visaSummary.currentRolling7Day.status === 'VIOLATION'
+                      ) {
+                        cellColor = 'bg-red-500';
+                      } else if (isWarningZone) {
+                        cellColor = 'bg-amber-400';
+                      } else {
+                        cellColor = 'bg-[#39d353]';
+                      }
+                    }
+
+                    return (
+                      <div
+                        key={idx}
+                        title={`Hour ${hourIndex}`}
+                        className={`h-3 transition-colors ${cellColor}`}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="flex justify-between text-[10px] font-mono text-zinc-500 mt-1.5">
+                  <span>
+                    WINDOW: {visaSummary.currentRolling7Day.windowStartDate} →{' '}
+                    {visaSummary.currentRolling7Day.windowEndDate}
+                  </span>
+                  <span>WARN @ {rules.warningThresholdHours}H</span>
+                </div>
               </div>
             </div>
 
-            <div className="mt-5 pt-4 border-t border-slate-800/80 grid grid-cols-2 gap-3 text-xs">
-              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                <span className="text-slate-400 block">Fixed Week (Mon–Sun)</span>
-                <span className="font-semibold text-white mt-0.5 block">
-                  {visaSummary.currentFixedWeek.totalHours}h /{' '}
-                  {visaSummary.activeLimitHours}h (
-                  {visaSummary.currentFixedWeek.remainingHours}h left)
+            {/* GitHub-Style 7-Day Contribution Strip + Fixed Week Comparison */}
+            <div className="mt-5 pt-4 border-t border-zinc-800/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-mono text-zinc-400">
+                  7D ACTIVITY HEATMAP
                 </span>
+                <div className="flex items-center gap-1.5">
+                  {sevenDayStrip.map((d) => {
+                    // GitHub contribution greens based on daily hours
+                    let bg = 'bg-zinc-900 border-zinc-800 text-zinc-600';
+                    if (d.hours > 0 && d.hours <= 4) {
+                      bg = 'bg-[#0e4429] border-[#006d32] text-zinc-200';
+                    } else if (d.hours > 4 && d.hours < 8) {
+                      bg = 'bg-[#006d32] border-[#26a641] text-white';
+                    } else if (d.hours >= 8) {
+                      bg = 'bg-[#39d353] border-[#39d353] text-black font-bold';
+                    }
+                    return (
+                      <div
+                        key={d.date}
+                        title={`${d.date}: ${d.hours}h`}
+                        className={`w-7 h-7 border text-[10px] font-mono flex flex-col items-center justify-center ${bg}`}
+                      >
+                        <span>{d.date.slice(8)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                <span className="text-slate-400 block">Peak 7-Day (30d Audit)</span>
-                <span
-                  className={`font-semibold mt-0.5 block ${
-                    visaSummary.peakRolling7DayLast30Days.status === 'VIOLATION'
-                      ? 'text-red-400'
-                      : 'text-white'
-                  }`}
-                >
-                  {visaSummary.peakRolling7DayLast30Days.totalHours}h (ends{' '}
-                  {visaSummary.peakRolling7DayLast30Days.windowEndDate.slice(5)})
-                </span>
+
+              <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+                <div className="bg-zinc-950 border border-zinc-800/90 p-2">
+                  <span className="text-[10px] text-zinc-500 block">
+                    MON–SUN FIXED WEEK
+                  </span>
+                  <span className="text-zinc-200 font-semibold">
+                    {visaSummary.currentFixedWeek.totalHours}h /{' '}
+                    {visaSummary.activeLimitHours}h
+                  </span>
+                </div>
+                <div className="bg-zinc-950 border border-zinc-800/90 p-2">
+                  <span className="text-[10px] text-zinc-500 block">
+                    30D PEAK ROLLING
+                  </span>
+                  <span
+                    className={`font-semibold ${
+                      visaSummary.peakRolling7DayLast30Days.status ===
+                      'VIOLATION'
+                        ? 'text-red-400'
+                        : 'text-zinc-200'
+                    }`}
+                  >
+                    {visaSummary.peakRolling7DayLast30Days.totalHours}h (
+                    {visaSummary.peakRolling7DayLast30Days.windowEndDate.slice(
+                      5
+                    )}
+                    )
+                  </span>
+                </div>
               </div>
             </div>
           </section>
 
-          {/* Card 2: Monthly Payout & Night Premium Breakdown */}
-          <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col justify-between">
+          {/* Panel 2: Monthly Gross & Night Premium Split */}
+          <section className="p-5 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-wider font-semibold text-slate-400">
-                  Monthly Wage Forecast ({monthlySummary.yearMonth})
+                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                  02 / MONTHLY PAYOUT ({monthlySummary.yearMonth})
                 </span>
-                <Coins className="w-4 h-4 text-amber-400" />
+                <span className="text-[11px] font-mono text-[#39d353] bg-[#0d2818] border border-[#238636] px-2 py-0.5">
+                  {monthlySummary.shiftCount} SHIFTS
+                </span>
               </div>
 
-              <div className="mt-3">
-                <span className="text-3xl font-extrabold text-white">
+              <div className="mt-4 flex items-baseline justify-between font-mono tabular-nums">
+                <span className="text-3xl font-bold text-white">
                   {formatYen(monthlySummary.totalPayoutYen)}
                 </span>
-                <p className="text-xs text-slate-400 mt-1">
-                  Across {monthlySummary.shiftCount} shifts (
-                  {monthlySummary.totalWorkedHours} net hrs)
-                </p>
+                <span className="text-xs text-zinc-400">
+                  {monthlySummary.totalWorkedHours} NET HRS
+                </span>
               </div>
 
-              <div className="mt-4 space-y-2.5 text-sm">
-                <div className="flex items-center justify-between bg-slate-950/60 px-3 py-2 rounded-lg border border-slate-800">
-                  <span className="text-xs text-slate-300">
-                    Base Hourly Wages (1.0x • {monthlySummary.totalWorkedHours}h)
+              <div className="mt-4 space-y-2 font-mono text-xs">
+                <div className="flex items-center justify-between bg-zinc-950 border border-zinc-800 px-3 py-2.5">
+                  <span className="text-zinc-400">
+                    BASE WAGE (1.00x • {monthlySummary.totalWorkedHours}h)
                   </span>
-                  <span className="font-mono font-semibold text-slate-100">
+                  <span className="text-zinc-100 font-semibold tabular-nums">
                     {formatYen(monthlySummary.totalBaseYen)}
                   </span>
                 </div>
-                <div className="flex items-center justify-between bg-indigo-950/30 px-3 py-2 rounded-lg border border-indigo-500/30">
-                  <span className="text-xs text-indigo-300 flex items-center gap-1.5">
+
+                <div className="flex items-center justify-between bg-[#0d2818]/40 border border-[#238636]/60 px-3 py-2.5">
+                  <span className="text-[#39d353] flex items-center gap-1.5">
                     <Moon className="w-3.5 h-3.5" />
-                    Night Premium Bonus (+25% • {monthlySummary.nightHours}h)
+                    NIGHT PREMIUM (+0.25x • {monthlySummary.nightHours}h)
                   </span>
-                  <span className="font-mono font-bold text-indigo-300">
+                  <span className="text-[#39d353] font-bold tabular-nums">
                     +{formatYen(monthlySummary.totalNightPremiumYen)}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-              <span>Standard Hours: {monthlySummary.standardHours}h</span>
-              <span>Night Window (22:00–05:00): {monthlySummary.nightHours}h</span>
+            <div className="mt-5 pt-4 border-t border-zinc-800/80 flex items-center justify-between text-[11px] font-mono text-zinc-400">
+              <span>DAY (05:00-22:00): {monthlySummary.standardHours}h</span>
+              <span className="text-[#39d353]">
+                NIGHT (22:00-05:00): {monthlySummary.nightHours}h
+              </span>
             </div>
           </section>
 
-          {/* Card 3: Annual Tax & Dependent Wall Tracker */}
-          <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col justify-between">
+          {/* Panel 3: Tax & Dependent Wall Telemetry */}
+          <section className="p-5 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-wider font-semibold text-slate-400">
-                  {taxWallStatus.year} Tax & Dependent Walls
+                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                  03 / {taxWallStatus.year} TAX & DEPENDENT WALLS
                 </span>
-                <Sparkles className="w-4 h-4 text-sky-400" />
+                <ArrowUpRight className="w-4 h-4 text-zinc-500" />
               </div>
 
-              <div className="mt-3 flex items-baseline justify-between">
+              <div className="mt-4 flex items-baseline justify-between font-mono tabular-nums">
                 <div>
-                  <span className="text-2xl font-extrabold text-white">
+                  <span className="text-2xl font-bold text-white">
                     {formatYen(taxWallStatus.cumulativeAnnualYen)}
                   </span>
-                  <span className="text-xs text-slate-400 block">
-                    YTD Logged Income
+                  <span className="text-[10px] text-zinc-500 block mt-0.5">
+                    YTD LOGGED GROSS
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="text-lg font-bold text-sky-400">
+                  <span className="text-lg font-bold text-[#39d353]">
                     {formatYen(taxWallStatus.projectedAnnualYen)}
                   </span>
-                  <span className="text-xs text-slate-400 block">
-                    Annualized Pace
+                  <span className="text-[10px] text-zinc-500 block mt-0.5">
+                    12M RUN-RATE
                   </span>
                 </div>
               </div>
 
-              {/* 1.03M Wall */}
-              <div className="mt-4 space-y-3">
+              <div className="mt-4 space-y-3 font-mono">
+                {/* 1.03M Wall */}
                 <div>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-300">¥1,030,000 Income Tax Wall</span>
-                    <span className="font-mono text-slate-400">
-                      {formatYen(taxWallStatus.remainingTo103WallYen)} buffer
+                  <div className="flex justify-between text-[11px] mb-1">
+                    <span className="text-zinc-300">¥1,030,000 TAX WALL</span>
+                    <span className="text-zinc-400 tabular-nums">
+                      {formatYen(taxWallStatus.remainingTo103WallYen)} REM
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="w-full h-2 bg-zinc-900 border border-zinc-800 overflow-hidden">
                     <div
-                      className="h-full bg-sky-500"
+                      className="h-full bg-[#2ea043]"
                       style={{
                         width: `${Math.min(
                           100,
@@ -414,17 +522,17 @@ export default function JapanVisaShiftDashboard() {
 
                 {/* 1.30M Wall */}
                 <div>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-300">
-                      ¥1,300,000 Social Insurance Wall
+                  <div className="flex justify-between text-[11px] mb-1">
+                    <span className="text-zinc-300">
+                      ¥1,300,000 SOCIAL INS. WALL
                     </span>
-                    <span className="font-mono text-slate-400">
-                      {formatYen(taxWallStatus.remainingTo130WallYen)} buffer
+                    <span className="text-zinc-400 tabular-nums">
+                      {formatYen(taxWallStatus.remainingTo130WallYen)} REM
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="w-full h-2 bg-zinc-900 border border-zinc-800 overflow-hidden">
                     <div
-                      className="h-full bg-purple-500"
+                      className="h-full bg-[#39d353]"
                       style={{
                         width: `${Math.min(
                           100,
@@ -439,8 +547,8 @@ export default function JapanVisaShiftDashboard() {
               </div>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-              <span className="text-slate-400">Break Rule:</span>
+            <div className="mt-5 pt-4 border-t border-zinc-800/80 flex items-center justify-between text-[11px] font-mono">
+              <span className="text-zinc-500">BREAK DEDUCTION</span>
               <select
                 value={rules.breakDeductionStrategy}
                 onChange={(e) =>
@@ -449,96 +557,92 @@ export default function JapanVisaShiftDashboard() {
                       .value as BreakDeductionStrategy,
                   })
                 }
-                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
+                className="bg-zinc-950 border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-200 focus:outline-none focus:border-[#238636]"
               >
-                <option value="STANDARD_FIRST">
-                  Deduct Break from Standard Hours First
-                </option>
-                <option value="NIGHT_FIRST">
-                  Deduct Break from Night Hours First
-                </option>
-                <option value="PROPORTIONAL">Deduct Break Proportionally</option>
+                <option value="STANDARD_FIRST">STANDARD_FIRST (1.0x)</option>
+                <option value="NIGHT_FIRST">NIGHT_FIRST (1.25x)</option>
+                <option value="PROPORTIONAL">PROPORTIONAL</option>
               </select>
             </div>
           </section>
         </div>
 
-        {/* Bottom Grid: Log Shift Form + Logged Shift Breakdown Table */}
+        {/* Bottom Workspace: Form + Shift Ledger Table */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Shift Logger Form (4 Columns) */}
-          <section className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg h-fit">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Clock className="w-4 h-4 text-indigo-400" />
-                Log Part-Time Shift
+          {/* Left Column: Shift Entry Console (4 cols) */}
+          <section className="lg:col-span-4 border border-zinc-800 bg-zinc-900/20 p-5 h-fit">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-zinc-800">
+              <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-200 flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 text-[#39d353]" />
+                COMMIT SHIFT ENTRY
               </h2>
-              <div className="flex gap-1.5">
+              <div className="flex gap-1">
                 <button
                   type="button"
                   onClick={() =>
-                    applyPreset('21:30', '06:30', 60, 'Overnight Warehouse')
+                    applyPreset('21:30', '06:30', 60, 'Fulfillment Night Pack')
                   }
-                  className="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                  className="text-[10px] font-mono px-2 py-0.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 transition"
                 >
                   21:30–06:30
                 </button>
                 <button
                   type="button"
                   onClick={() =>
-                    applyPreset('17:00', '23:00', 30, 'Evening Konbini')
+                    applyPreset('17:00', '23:00', 30, 'Evening Kitchen/Hall')
                   }
-                  className="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                  className="text-[10px] font-mono px-2 py-0.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 transition"
                 >
                   17:00–23:00
                 </button>
               </div>
             </div>
 
-            <form onSubmit={handleAddShift} className="space-y-4">
+            <form onSubmit={handleAddShift} className="space-y-4 font-mono">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  Shift Start Date (JST)
+                <label className="block text-[11px] text-zinc-400 mb-1">
+                  SHIFT_DATE (JST)
                 </label>
                 <input
                   type="date"
                   required
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
+                  className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-[#238636]"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    Start Time
+                  <label className="block text-[11px] text-zinc-400 mb-1">
+                    START_TIME
                   </label>
                   <input
                     type="time"
                     required
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono"
+                    className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-[#238636]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    End Time
+                  <label className="block text-[11px] text-zinc-400 mb-1">
+                    END_TIME
                   </label>
                   <input
                     type="time"
                     required
                     value={endTime}
                     onChange={(e) => setEndTime(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono"
+                    className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-[#238636]"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    Unpaid Break (Mins)
+                  <label className="block text-[11px] text-zinc-400 mb-1">
+                    BREAK_MINS
                   </label>
                   <input
                     type="number"
@@ -547,12 +651,12 @@ export default function JapanVisaShiftDashboard() {
                     required
                     value={breakMinutes}
                     onChange={(e) => setBreakMinutes(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono"
+                    className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-[#238636]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    Base Wage (¥ / hr)
+                  <label className="block text-[11px] text-zinc-400 mb-1">
+                    BASE_YPH (¥)
                   </label>
                   <input
                     type="number"
@@ -561,52 +665,53 @@ export default function JapanVisaShiftDashboard() {
                     required
                     value={baseHourlyYen}
                     onChange={(e) => setBaseHourlyYen(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono"
+                    className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-[#238636]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  Workplace / Note (Optional)
+                <label className="block text-[11px] text-zinc-400 mb-1">
+                  NOTE / LOCATION
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., Amazon FC Night Shift"
+                  placeholder="e.g. Sayama Night Pack / Hall Shift"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
+                  className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-[#238636]"
                 />
               </div>
 
-              {/* Instant Live Split Preview */}
+              {/* Live Calculation Readout */}
               {liveDraftPreview && (
-                <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
-                  <div className="flex items-center justify-between font-semibold text-slate-200">
-                    <span>
-                      Live Calculation (
-                      {liveDraftPreview.isOvernight ? 'Overnight +1d' : 'Same-Day'})
+                <div className="bg-zinc-950 border border-zinc-800 p-3 space-y-2 text-xs">
+                  <div className="flex items-center justify-between border-b border-zinc-800/80 pb-1.5">
+                    <span className="text-[11px] text-zinc-400">
+                      EST_PAYOUT (
+                      {liveDraftPreview.isOvernight ? 'OVERNIGHT +1D' : 'SAME_DAY'}
+                      )
                     </span>
-                    <span className="text-emerald-400 font-mono text-sm">
+                    <span className="text-[#39d353] font-bold text-sm tabular-nums">
                       {formatYen(liveDraftPreview.totalPayYen)}
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-slate-400 pt-1 border-t border-slate-800">
+                  <div className="grid grid-cols-2 gap-y-1 text-[11px] text-zinc-400 tabular-nums">
                     <div>
-                      Standard (1.0x):{' '}
-                      <span className="text-slate-200 font-mono">
+                      STD (1.0x):{' '}
+                      <span className="text-zinc-200">
                         {liveDraftPreview.netStandardHours}h
                       </span>
                     </div>
                     <div>
-                      Night (1.25x):{' '}
-                      <span className="text-indigo-300 font-mono">
+                      NIGHT (1.25x):{' '}
+                      <span className="text-[#39d353]">
                         {liveDraftPreview.netNightHours}h
                       </span>
                     </div>
                     <div>
-                      Base Yen:{' '}
-                      <span className="text-slate-200 font-mono">
+                      BASE:{' '}
+                      <span className="text-zinc-200">
                         {formatYen(
                           liveDraftPreview.normalBaseYen +
                             liveDraftPreview.nightBaseYen
@@ -614,8 +719,8 @@ export default function JapanVisaShiftDashboard() {
                       </span>
                     </div>
                     <div>
-                      Night 25% Bonus:{' '}
-                      <span className="text-indigo-300 font-mono">
+                      +25% BONUS:{' '}
+                      <span className="text-[#39d353]">
                         +{formatYen(liveDraftPreview.nightPremiumYen)}
                       </span>
                     </div>
@@ -624,31 +729,31 @@ export default function JapanVisaShiftDashboard() {
               )}
 
               {errorMsg && (
-                <p className="text-xs text-red-400 bg-red-950/40 border border-red-500/30 rounded-lg p-2.5">
-                  {errorMsg}
+                <p className="text-xs text-red-400 bg-red-950/50 border border-red-800 p-2.5">
+                  [ERR] {errorMsg}
                 </p>
               )}
 
               <button
                 type="submit"
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm rounded-xl shadow flex items-center justify-center gap-2 transition"
+                className="w-full py-2.5 px-4 bg-[#238636] hover:bg-[#2ea043] text-white font-mono font-bold text-xs uppercase tracking-wider border border-[#39d353]/40 flex items-center justify-center gap-2 transition cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                Save Shift & Update Visa Gauge
+                COMMIT SHIFT RECORD
               </button>
             </form>
           </section>
 
-          {/* Shift History & Precision Wage Breakdown Table (8 Columns) */}
-          <section className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
-            <div className="flex items-center justify-between mb-4">
+          {/* Right Column: High-Density Ledger Table (8 cols) */}
+          <section className="lg:col-span-8 border border-zinc-800 bg-zinc-900/20 flex flex-col">
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
               <div>
-                <h2 className="text-base font-bold text-white">
-                  Logged Shifts & Night Premium Split
+                <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-200">
+                  SHIFT AUDIT LEDGER ({computedShifts.length} RECORDS)
                 </h2>
-                <p className="text-xs text-slate-400">
-                  Click any shift date to inspect the 7-day rolling window ending on
-                  that day
+                <p className="text-[11px] font-mono text-zinc-500 mt-0.5">
+                  Select any row to anchor the 7-day rolling compliance gauge to
+                  that date
                 </p>
               </div>
               {shifts.length > 0 && (
@@ -658,125 +763,128 @@ export default function JapanVisaShiftDashboard() {
                     localShiftRepository.clearAll();
                     setShifts([]);
                   }}
-                  className="text-xs text-slate-400 hover:text-red-400 transition"
+                  className="text-[11px] font-mono text-zinc-500 hover:text-red-400 flex items-center gap-1 transition"
                 >
-                  Clear All
+                  <RotateCcw className="w-3 h-3" />
+                  PURGE_ALL
                 </button>
               )}
             </div>
 
             {computedShifts.length === 0 ? (
-              <div className="text-center py-12 border border-dashed border-slate-800 rounded-xl text-slate-400 text-sm">
-                No shifts logged yet. Add a shift on the left to calculate your
-                visa hours and night shift multiplier.
+              <div className="p-12 text-center font-mono text-xs text-zinc-500">
+                [EMPTY_LEDGER] No shift records committed.
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
+                <table className="w-full text-left border-collapse font-mono tabular-nums">
                   <thead>
-                    <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
-                      <th className="py-3 px-2">Date / Shift</th>
-                      <th className="py-3 px-2">Net Hours</th>
-                      <th className="py-3 px-2">Standard vs. Night</th>
-                      <th className="py-3 px-2">Base Yen (1.0x)</th>
-                      <th className="py-3 px-2">Night Bonus (+25%)</th>
-                      <th className="py-3 px-2 text-right">Total Payout</th>
-                      <th className="py-3 px-2 text-right">Action</th>
+                    <tr className="border-b border-zinc-800 bg-zinc-950/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                      <th className="py-3 px-4">DATE / WINDOW</th>
+                      <th className="py-3 px-3">NET HRS</th>
+                      <th className="py-3 px-3">SPLIT (1.0x / 1.25x)</th>
+                      <th className="py-3 px-3">BASE (1.0x)</th>
+                      <th className="py-3 px-3">NIGHT (+25%)</th>
+                      <th className="py-3 px-4 text-right">GROSS JPY</th>
+                      <th className="py-3 px-3 text-right">DEL</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/70 text-sm">
+                  <tbody className="divide-y divide-zinc-800/70 text-xs">
                     {computedShifts.map((s) => {
                       const rollingOnShiftDate = getVisaStatusSummary(
                         shifts,
                         s.date,
                         rules
                       ).currentRolling7Day;
+                      const isSelected = referenceDate === s.date;
 
                       return (
                         <tr
                           key={s.id}
                           onClick={() => setReferenceDate(s.date)}
-                          className={`cursor-pointer transition hover:bg-slate-800/50 ${
-                            referenceDate === s.date ? 'bg-indigo-950/25' : ''
+                          className={`cursor-pointer transition ${
+                            isSelected
+                              ? 'bg-[#0d2818]/50 border-l-2 border-l-[#39d353]'
+                              : 'hover:bg-zinc-900/80'
                           }`}
                         >
-                          <td className="py-3 px-2">
-                            <div className="font-mono font-semibold text-white flex items-center gap-2">
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-zinc-100 flex items-center gap-2">
                               {s.date}
                               {s.isOvernight && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                                  +1d
+                                <span className="text-[10px] px-1.5 py-0.2 bg-zinc-800 text-zinc-300 border border-zinc-700">
+                                  +1D
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-slate-400 font-mono">
-                              {s.startTime}–{s.endTime} ({s.breakMinutes}m break)
+                            <div className="text-[11px] text-zinc-500">
+                              {s.startTime}→{s.endTime} (-{s.breakMinutes}m)
                             </div>
                             {s.note && (
-                              <div className="text-xs text-slate-400 truncate max-w-[180px]">
+                              <div className="text-[11px] text-zinc-400 truncate max-w-[190px]">
                                 {s.note}
                               </div>
                             )}
                           </td>
 
-                          <td className="py-3 px-2">
-                            <span className="font-mono font-bold text-white">
-                              {s.netWorkedHours}h
+                          <td className="py-3 px-3">
+                            <span className="font-bold text-white">
+                              {s.netWorkedHours.toFixed(2)}h
                             </span>
                             <span
-                              className={`block text-[11px] font-mono ${
+                              className={`block text-[10px] ${
                                 rollingOnShiftDate.status === 'VIOLATION'
-                                  ? 'text-red-400 font-semibold'
+                                  ? 'text-red-400 font-bold'
                                   : rollingOnShiftDate.status === 'WARNING'
-                                  ? 'text-amber-300'
-                                  : 'text-slate-400'
+                                  ? 'text-amber-400'
+                                  : 'text-zinc-500'
                               }`}
                             >
-                              7d roll: {rollingOnShiftDate.totalHours}h
+                              7D: {rollingOnShiftDate.totalHours}h
                             </span>
                           </td>
 
-                          <td className="py-3 px-2 text-xs font-mono">
-                            <div className="text-slate-300">
-                              Std: {s.netStandardHours}h
+                          <td className="py-3 px-3 text-[11px]">
+                            <div className="text-zinc-400">
+                              DAY: {s.netStandardHours}h
                             </div>
-                            <div className="text-indigo-300">
-                              Night: {s.netNightHours}h
+                            <div className="text-[#39d353]">
+                              NGT: {s.netNightHours}h
                             </div>
                           </td>
 
-                          <td className="py-3 px-2 font-mono text-xs text-slate-200">
+                          <td className="py-3 px-3 text-zinc-300">
                             {formatYen(s.normalBaseYen + s.nightBaseYen)}
-                            <span className="block text-[10px] text-slate-400">
-                              @{formatYen(s.baseHourlyYen)}/h
+                            <span className="block text-[10px] text-zinc-500">
+                              @{s.baseHourlyYen}/h
                             </span>
                           </td>
 
-                          <td className="py-3 px-2 font-mono text-xs">
+                          <td className="py-3 px-3">
                             {s.nightPremiumYen > 0 ? (
-                              <span className="text-indigo-300 font-semibold">
+                              <span className="text-[#39d353] font-semibold">
                                 +{formatYen(s.nightPremiumYen)}
                               </span>
                             ) : (
-                              <span className="text-slate-500">¥0</span>
+                              <span className="text-zinc-600">¥0</span>
                             )}
                           </td>
 
-                          <td className="py-3 px-2 font-mono font-bold text-emerald-400 text-right">
+                          <td className="py-3 px-4 font-bold text-white text-right">
                             {formatYen(s.totalPayYen)}
                           </td>
 
                           <td
-                            className="py-3 px-2 text-right"
+                            className="py-3 px-3 text-right"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <button
                               type="button"
                               onClick={() => handleDeleteShift(s.id)}
-                              className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg hover:bg-slate-800 transition"
-                              title="Delete Shift"
+                              className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition"
+                              title="Delete Shift Record"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </td>
                         </tr>
